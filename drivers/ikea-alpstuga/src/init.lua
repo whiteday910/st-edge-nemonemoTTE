@@ -302,6 +302,19 @@ local function device_removed(driver, device)
   log.info("[ALPSTUGA] 디바이스 제거됨")
 end
 
+-- '설정' 페이지의 preference 변경 감지
+-- syncNow 토글이 false → true 로 바뀔 때 시간 동기화 실행
+local function info_changed(driver, device, event, args)
+  local prefs = device.preferences
+  local old_prefs = args.old_st_store and args.old_st_store.preferences
+
+  if prefs and prefs.syncNow == true
+    and (old_prefs == nil or old_prefs.syncNow ~= true) then
+    log.info("[ALPSTUGA] 설정 > 시간 동기화 요청 수신")
+    sync_time(driver, device)
+  end
+end
+
 -- ============================================================
 -- matter_handlers: SDK 클러스터 객체 우선, 없으면 raw ID로 등록
 -- ============================================================
@@ -402,10 +415,11 @@ local alpstuga_driver_template = {
   },
 
   lifecycle_handlers = {
-    added      = device_added,
-    init       = device_init,
+    added       = device_added,
+    init        = device_init,
     doConfigure = device_configure,
-    removed    = device_removed,
+    removed     = device_removed,
+    infoChanged = info_changed,
   },
 
   capability_handlers = {

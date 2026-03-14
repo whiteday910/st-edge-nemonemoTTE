@@ -23,3 +23,12 @@ components:
         version: 1
     categories:
       - name: AirQualityDetector
+preferences:
+  - preferenceId: syncNow
+    name: syncNow
+    title: "시간 동기화"
+    description: "켜면 즉시 디바이스 시간을 현재 시간으로 동기화합니다"
+    required: false
+    preferenceType: boolean
+    definition:
+      default: false
