@@ -1,0 +1,6 @@
+matterManufacturer:
+  - id: "IKEA/ALPSTUGA/E2495"
+    deviceLabel: "IKEA ALPSTUGA"
+    vendorId: 0x117C
+    productId: 0x3001
+    deviceProfileName: alpstuga-profile

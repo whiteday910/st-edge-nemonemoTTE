@@ -1,0 +1,7 @@
+name: IKEA ALPSTUGA
+packageKey: ikea-alpstuga-v2
+vendorSupportInformation: jhkim
+description: IKEA ALPSTUGA 공기질 센서 Edge Driver - Matter over Thread, 시간 동기화 포함
+
+permissions:
+  matter: {}
