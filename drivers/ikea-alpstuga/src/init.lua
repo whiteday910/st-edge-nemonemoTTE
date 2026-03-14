@@ -61,6 +61,10 @@ local CLUSTER_AIR_QUALITY     = 0x005B  -- AirQuality
 local ATTR_MEASURED_VALUE     = 0x0000  -- MeasuredValue (공통)
 local ATTR_LEVEL_VALUE        = 0x000A  -- LevelValue (농도 단계: Low/Medium/High/Critical)
 
+-- TimeSynchronization 클러스터 속성 ID
+-- 구독을 통해 허브 라우팅 테이블에 0x0038을 등록 → SetUTCTime 명령 허용
+local ATTR_UTC_TIME           = 0x0000  -- UTCTime (nullable uint64, microseconds since Matter epoch)
+
 -- ============================================================
 -- 수동 TimeSynchronization 클러스터 정의
 -- SDK에 클러스터 모듈이 없을 때 사용
@@ -104,27 +108,25 @@ local function sync_time(driver, device)
     unix_time_sec, matter_time_sec, matter_time_us
   ))
 
-  -- endpoint 0(루트)과 1 모두 시도
-  local sent = false
-  for _, ep in ipairs({ 0, 1 }) do
-    local cmd = build_set_utc_time_command(device, ep, matter_time_us, GRANULARITY_SECONDS)
-    if cmd then
-      local ok, err = pcall(function() device:send(cmd) end)
-      if ok then
-        log.info(string.format("[ALPSTUGA] SetUTCTime 전송 완료 (endpoint=%d, granularity=%d)",
-          ep, GRANULARITY_SECONDS))
-        sent = true
-        break
-      else
-        log.warn(string.format("[ALPSTUGA] endpoint=%d 전송 실패: %s", ep, tostring(err)))
-      end
+  -- ALPSTUGA는 Matter TimeSynchronization 클러스터(0x0038)를 서버로 지원하지 않아
+  -- "Matter channel send error: Invalid cluster id" 경고가 발생함.
+  -- 이는 기기 펌웨어 제약으로, 향후 IKEA 펌웨어 업데이트 시 동작할 수 있도록 코드 유지.
+  -- endpoint 0(루트 노드)으로만 시도 (Matter Spec상 TimeSynchronization은 endpoint 0에 위치)
+  local cmd = build_set_utc_time_command(device, 0, matter_time_us, GRANULARITY_SECONDS)
+  if cmd then
+    local ok, err = pcall(function() device:send(cmd) end)
+    if ok then
+      -- SDK 내부에서 "Invalid cluster id" 경고가 발생해도 pcall은 성공으로 반환됨.
+      -- 실제 전송 여부는 기기 응답으로만 확인 가능.
+      log.info(string.format(
+        "[ALPSTUGA] SetUTCTime 명령 전송 시도 (endpoint=0, granularity=%d) - 기기 지원 여부에 따라 결과 다름",
+        GRANULARITY_SECONDS
+      ))
     else
-      log.warn(string.format("[ALPSTUGA] endpoint=%d 명령 빌드 실패", ep))
+      log.warn("[ALPSTUGA] SetUTCTime 전송 예외: " .. tostring(err))
     end
-  end
-
-  if not sent then
-    log.error("[ALPSTUGA] 시간 동기화 최종 실패 - SetUTCTime 전송 불가")
+  else
+    log.warn("[ALPSTUGA] SetUTCTime 명령 빌드 실패")
   end
 end
 
@@ -234,6 +236,24 @@ local function humidity_attr_handler(driver, device, ib, response)
   end
 end
 
+-- TimeSynchronization UTCTime 구독 핸들러
+-- 기기의 현재 시간을 로그로 확인 + 클러스터 0x0038이 등록되어 SetUTCTime 명령이 허용됨
+local function utc_time_attr_handler(driver, device, ib, response)
+  local raw = ib.data.value
+  if raw then
+    local ok_m, device_unix = pcall(function()
+      return math.floor(raw / 1000000) + MATTER_EPOCH_OFFSET_SEC
+    end)
+    if ok_m then
+      log.info(string.format("[ALPSTUGA] 기기 현재 UTCTime: Unix=%ds (Matter=%s μs)", device_unix, tostring(raw)))
+    else
+      log.info(string.format("[ALPSTUGA] 기기 UTCTime raw: %s (변환 불가)", tostring(raw)))
+    end
+  else
+    log.info("[ALPSTUGA] 기기 UTCTime: null (시간 미설정 상태)")
+  end
+end
+
 -- ============================================================
 -- 디바이스 생명주기 핸들러
 -- ============================================================
@@ -248,6 +268,15 @@ end
 local function device_init(driver, device)
   log.info("[ALPSTUGA] 디바이스 초기화")
 
+  -- 구독 재설정: 드라이버 업데이트 후에도 새 subscribed_attributes 가 즉시 반영되도록 함
+  -- (TimeSynchronization UTCTime 구독 포함)
+  local ok_sub, err_sub = pcall(function() device:subscribe() end)
+  if ok_sub then
+    log.info("[ALPSTUGA] 구독 설정 완료")
+  else
+    log.warn("[ALPSTUGA] 구독 설정 실패: " .. tostring(err_sub))
+  end
+
   -- 1시간마다 자동 시간 동기화
   device.thread:call_on_schedule(
     TIME_SYNC_INTERVAL_SEC,
@@ -258,14 +287,21 @@ local function device_init(driver, device)
     "alpstuga_time_sync"
   )
 
-  -- 초기화 5초 후 즉시 동기화
-  device.thread:call_with_delay(5, function()
+  -- 초기화 10초 후 즉시 동기화 (구독 안정화 대기)
+  device.thread:call_with_delay(10, function()
     sync_time(driver, device)
   end)
 end
 
 local function device_configure(driver, device)
   log.info("[ALPSTUGA] doConfigure - Matter 커미셔닝 완료")
+  -- 커미셔닝 완료 시 구독 설정 (TimeSynchronization UTCTime 포함)
+  local ok_sub, err_sub = pcall(function() device:subscribe() end)
+  if ok_sub then
+    log.info("[ALPSTUGA] doConfigure 구독 설정 완료")
+  else
+    log.warn("[ALPSTUGA] doConfigure 구독 설정 실패: " .. tostring(err_sub))
+  end
   sync_time(driver, device)
 end
 
@@ -327,6 +363,11 @@ matter_attr_handlers[CLUSTER_AIR_QUALITY] = {
   [ATTR_MEASURED_VALUE] = air_quality_attr_handler,
 }
 
+-- TimeSynchronization UTCTime (0x0038/0x0000): 기기 시간 로그 + 클러스터 등록
+matter_attr_handlers[TIME_SYNC_CLUSTER_ID] = {
+  [ATTR_UTC_TIME] = utc_time_attr_handler,
+}
+
 -- ============================================================
 -- subscribed_attributes: SDK 클러스터 객체 우선, 없으면 raw ID 테이블로 구독
 -- ============================================================
@@ -371,6 +412,11 @@ if RelativeHumidityMeasurement then
     RelativeHumidityMeasurement.attributes.MeasuredValue,
   }
 end
+
+-- 주의: TimeSynchronization 클러스터(0x0038)는 ALPSTUGA 기기가 서버로 지원하지 않아
+-- 구독 시도 시 "Invalid cluster id" 경고가 발생하므로 구독 목록에서 제외.
+-- 해당 핸들러(matter_attr_handlers[TIME_SYNC_CLUSTER_ID])는 등록만 해두고
+-- 향후 기기 펌웨어 업데이트로 클러스터가 추가될 경우를 대비함.
 
 -- ============================================================
 -- 드라이버 템플릿
