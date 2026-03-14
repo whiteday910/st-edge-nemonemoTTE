@@ -21,7 +21,15 @@ local function safe_cluster(name)
   end
 end
 
-local TimeSynchronization                   = safe_cluster("TimeSynchronization")
+-- TimeSynchronization: SDK 우선, 없으면 내장 클러스터 사용
+local TimeSynchronization = safe_cluster("TimeSynchronization")
+if not TimeSynchronization then
+  local ok, ts = pcall(require, "TimeSynchronization")
+  if ok and ts then
+    TimeSynchronization = ts
+    log.info("[ALPSTUGA] TimeSynchronization 내장 클러스터 로드 성공")
+  end
+end
 local CarbonDioxideConcentrationMeasurement = safe_cluster("CarbonDioxideConcentrationMeasurement")
 local Pm25ConcentrationMeasurement          = safe_cluster("Pm25ConcentrationMeasurement")
 local TemperatureMeasurement                = safe_cluster("TemperatureMeasurement")
@@ -41,8 +49,9 @@ local TIME_SYNC_INTERVAL_SEC  = 3600
 local TIME_SYNC_CLUSTER_ID    = 0x0038
 -- SetUTCTime 커맨드 ID (0x0000)
 local SET_UTC_TIME_CMD_ID     = 0x0000
--- GranularityEnum: Seconds (3)
-local GRANULARITY_SECONDS     = 3
+-- GranularityEnum: kSecondsGranularity = 2 (Matter Spec 1.0+)
+-- 0=None, 1=Minutes, 2=Seconds, 3=Milliseconds, 4=Microseconds
+local GRANULARITY_SECONDS     = 2
 
 -- SDK 클러스터 모듈 없이 raw ID로 직접 구독/처리할 클러스터
 -- SmartThings 문서: subscribed_attributes 에 {cluster=ID, attribute=ID} 테이블 사용 가능
@@ -57,66 +66,21 @@ local ATTR_LEVEL_VALUE        = 0x000A  -- LevelValue (농도 단계: Low/Medium
 -- SDK에 클러스터 모듈이 없을 때 사용
 -- ============================================================
 
---- SDK 없이 Matter SetUTCTime 명령을 직접 구성합니다.
---- cluster_base 또는 interaction_model 모듈을 활용합니다.
+--- SetUTCTime 명령을 빌드합니다.
+--- TimeSynchronization 내장 클러스터의 build_cluster_command를 사용합니다.
 local function build_set_utc_time_command(device, endpoint_id, utc_time, granularity)
-  -- 방법 1: SDK 클러스터 모듈 사용 (있을 경우)
   if TimeSynchronization and TimeSynchronization.commands and TimeSynchronization.commands.SetUTCTime then
     local ok, cmd = pcall(function()
       return TimeSynchronization.commands.SetUTCTime(device, endpoint_id, utc_time, granularity)
     end)
     if ok and cmd then
-      log.debug("[ALPSTUGA] SetUTCTime 빌드 성공 (SDK 클러스터)")
+      log.debug("[ALPSTUGA] SetUTCTime 빌드 성공")
       return cmd
     end
-    log.warn("[ALPSTUGA] SDK 클러스터 빌드 실패, 대안 방법 시도")
+    log.error("[ALPSTUGA] SetUTCTime 빌드 실패: " .. tostring(cmd))
+  else
+    log.error("[ALPSTUGA] TimeSynchronization 클러스터 없음 - 시간 동기화 불가")
   end
-
-  -- 방법 2: cluster_base 모듈로 수동 구성
-  local cb_ok, cluster_base = pcall(require, "st.matter.cluster_base")
-  if cb_ok and cluster_base then
-    -- SetUTCTime TLV 인자: { UTCTime(uint64, tag=0), Granularity(uint8, tag=1) }
-    local ok2, cmd2 = pcall(function()
-      return cluster_base.build_manufacturer_specific_command(
-        device,
-        endpoint_id,
-        TIME_SYNC_CLUSTER_ID,
-        SET_UTC_TIME_CMD_ID,
-        nil,           -- mfr_code: nil = 표준 명령
-        utc_time,
-        granularity
-      )
-    end)
-    if ok2 and cmd2 then
-      log.debug("[ALPSTUGA] SetUTCTime 빌드 성공 (cluster_base)")
-      return cmd2
-    end
-    log.warn("[ALPSTUGA] cluster_base 빌드 실패, interaction_model 시도")
-  end
-
-  -- 방법 3: interaction_model 로 직접 구성
-  local im_ok, im = pcall(require, "st.matter.interaction_model")
-  if im_ok and im then
-    local ok3, cmd3 = pcall(function()
-      local req = im.InteractionRequest(
-        im.InteractionRequest.RequestType.INVOKE, {}
-      )
-      req:merge({
-        endpoint_id = endpoint_id,
-        cluster_id  = TIME_SYNC_CLUSTER_ID,
-        command_id  = SET_UTC_TIME_CMD_ID,
-        args        = { utc_time, granularity }
-      })
-      return req
-    end)
-    if ok3 and cmd3 then
-      log.debug("[ALPSTUGA] SetUTCTime 빌드 성공 (interaction_model)")
-      return cmd3
-    end
-    log.warn("[ALPSTUGA] interaction_model 빌드 실패")
-  end
-
-  log.error("[ALPSTUGA] SetUTCTime 명령 빌드 실패 - 모든 방법 소진")
   return nil
 end
 
