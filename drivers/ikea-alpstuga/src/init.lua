@@ -105,20 +105,27 @@ local function sync_time(driver, device)
   ))
 
   -- endpoint 0(루트)과 1 모두 시도
+  local sent = false
   for _, ep in ipairs({ 0, 1 }) do
     local cmd = build_set_utc_time_command(device, ep, matter_time_us, GRANULARITY_SECONDS)
     if cmd then
       local ok, err = pcall(function() device:send(cmd) end)
       if ok then
-        log.info(string.format("[ALPSTUGA] SetUTCTime 전송 완료 (endpoint=%d)", ep))
-        return
+        log.info(string.format("[ALPSTUGA] SetUTCTime 전송 완료 (endpoint=%d, granularity=%d)",
+          ep, GRANULARITY_SECONDS))
+        sent = true
+        break
       else
         log.warn(string.format("[ALPSTUGA] endpoint=%d 전송 실패: %s", ep, tostring(err)))
       end
+    else
+      log.warn(string.format("[ALPSTUGA] endpoint=%d 명령 빌드 실패", ep))
     end
   end
 
-  log.error("[ALPSTUGA] 시간 동기화 최종 실패")
+  if not sent then
+    log.error("[ALPSTUGA] 시간 동기화 최종 실패 - SetUTCTime 전송 불가")
+  end
 end
 
 -- ============================================================
@@ -267,14 +274,18 @@ local function device_removed(driver, device)
 end
 
 -- '설정' 페이지의 preference 변경 감지
--- syncNow 토글이 false → true 로 바뀔 때 시간 동기화 실행
+-- syncNow 토글이 변경될 때마다 (ON→OFF, OFF→ON 모두) 시간 동기화 실행
+-- 이전 값이 true로 고정된 경우에도 OFF했다가 ON하면 재동기화 가능
 local function info_changed(driver, device, event, args)
-  local prefs = device.preferences
+  local prefs    = device.preferences
   local old_prefs = args.old_st_store and args.old_st_store.preferences
 
-  if prefs and prefs.syncNow == true
-    and (old_prefs == nil or old_prefs.syncNow ~= true) then
-    log.info("[ALPSTUGA] 설정 > 시간 동기화 요청 수신")
+  local new_val = prefs and prefs.syncNow
+  local old_val = old_prefs and old_prefs.syncNow
+
+  if new_val ~= old_val then
+    log.info(string.format("[ALPSTUGA] 설정 > 시간 동기화 토글 변경 (%s → %s) - 동기화 실행",
+      tostring(old_val), tostring(new_val)))
     sync_time(driver, device)
   end
 end

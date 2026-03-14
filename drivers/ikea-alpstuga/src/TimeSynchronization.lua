@@ -12,6 +12,23 @@ local cluster_base = require "st.matter.cluster_base"
 local data_types = require "st.matter.data_types"
 local TLVParser = require "st.matter.TLV.TLVParser"
 
+-- Uint64 타입 안전 로드 (SmartThings SDK 버전마다 위치가 다를 수 있음)
+local Uint64Type = data_types.Uint64
+if not Uint64Type then
+  local ok, t = pcall(require, "st.matter.data_types.Uint64")
+  if ok and t then Uint64Type = t end
+end
+if not Uint64Type then
+  -- Lua 5.3+ 정수 지원: 직접 래퍼 생성
+  Uint64Type = data_types.Uint32  -- 폴백 (값 손실 위험 있지만 크래시 방지)
+  log.warn("[ALPSTUGA] Uint64 타입 없음 - Uint32 폴백 사용 (시간 정밀도 저하)")
+end
+
+local Uint8Type = data_types.Uint8 or (function()
+  local ok, t = pcall(require, "st.matter.data_types.Uint8")
+  return ok and t or nil
+end)()
+
 local TimeSynchronization = {}
 TimeSynchronization.ID   = 0x0038
 TimeSynchronization.NAME = "TimeSynchronization"
@@ -28,21 +45,21 @@ local SetUTCTime = {
       field_id    = 0,
       is_nullable = false,
       is_optional = false,
-      data_type   = data_types.Uint64,
+      data_type   = Uint64Type,
     },
     {
       name        = "granularity",
       field_id    = 1,
       is_nullable = false,
       is_optional = false,
-      data_type   = data_types.Uint8,
+      data_type   = Uint8Type,
     },
     {
       name        = "timeSource",
       field_id    = 2,
       is_nullable = false,
       is_optional = true,
-      data_type   = data_types.Uint8,
+      data_type   = Uint8Type,
     },
   },
 }
