@@ -1,7 +1,7 @@
 name: IKEA ALPSTUGA
 packageKey: ikea-alpstuga-v2
-vendorSupportInformation: jhkim
-description: IKEA ALPSTUGA 공기질 센서 Edge Driver - Matter over Thread, 시간 동기화 포함
+vendorSupportInformation: https://www.youtube.com/@nemonemoTTE
+description: "IKEA ALPSTUGA(E2495) 공기질 센서 Edge Driver - Matter over Thread. CO2, PM2.5, 온도, 습도, 공기질 지원. ※ 시간 동기화는 SmartThings Edge Driver 플랫폼 제약으로 미지원"
 
 permissions:
   matter: {}
