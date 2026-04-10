@@ -1,0 +1,6 @@
+zigbeeManufacturer:
+  - id: "Tuya/TY0A01"
+    deviceLabel: "hwi lock"
+    manufacturer: "_TYST12_yr4g31kf"
+    model: "TY0A01"
+    deviceProfileName: hwi-lock-profile

@@ -1,0 +1,6 @@
+name: hwi lock
+packageKey: hwi-lock
+vendorSupportInformation: https://www.youtube.com/@nemonemoTTE
+description: "hwi lock Zigbee 도어락 Edge Driver - Tuya 기반 Zigbee 자물쇠. 잠금/열림, 배터리 지원."
+permissions:
+  zigbee: {}
